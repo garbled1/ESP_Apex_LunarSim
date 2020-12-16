@@ -520,6 +520,11 @@ void setup() {
       request->send(info_html(request));
     });
 
+  server.on("/reboot", HTTP_GET, [](AsyncWebServerRequest *request){
+      request->send(200, "text/plain", "Rebooting...");
+      restartRequired = true;
+    });
+
   server.on("/post", HTTP_POST, [](AsyncWebServerRequest *request){
         String message;
 
