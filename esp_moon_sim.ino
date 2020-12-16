@@ -23,7 +23,7 @@
 #define APEX_HOST "phoenix.garbled.net"
 #define NTP_SERVER "ntp.garbled.net"
 #define NTP_TZ -7
-#define APEX_MOONDEV "BluLED_4_5"
+#define APEX_MOONDEV "VAR_ESPMoon"
 #define KNOWN_NEW_MOON 1592721660 /* 06:41 6/21/2020 UTC */
 #define LUNAR_CYCLE 29.530588853
 #define MAX_ILLUM 0.30 /* Max illumination of the controller */
@@ -43,6 +43,7 @@ SSD1306Wire display(0x3C, D2, D1);
 AsyncHTTPRequest request;
 Ticker ticker;
 
+int _debug = 0;
 
 /***********************MCP42XXX Commands************************/
 const int CS_PIN = D8;
@@ -121,13 +122,16 @@ float get_lunar_illumination() {
 
   time_t t = DateTime.now();
   sec_since_known = (unsigned long)t - KNOWN_NEW_MOON;
-  //Serial.printf("Sec since known = %d\n", sec_since_known);
+  if (_debug)
+    Serial.printf("Sec since known = %d\n", sec_since_known);
 
   days_since_known = sec_since_known / 86400.0;
-  //Serial.printf("Days since known = %f\n", days_since_known);
+  if (_debug)
+    Serial.printf("Days since known = %f\n", days_since_known);
 
   cycles_since_known = days_since_known / LUNAR_CYCLE;
-  //Serial.printf("Cycles since known = %f\n", cycles_since_known);
+  if (_debug)
+    Serial.printf("Cycles since known = %f\n", cycles_since_known);
 
   /* Knock off the left of the decimal */
   f = cycles_since_known - (int)cycles_since_known;
@@ -368,23 +372,26 @@ void ApexDataCB(void* optParm, AsyncHTTPRequest* request, size_t avail)
   /* Try to find the moon device in the current buffer */
   stridx = Apex_Json.indexOf(str_apex_moondev);
   if (stridx != -1) {
-    //Serial.printf("found Moon Device at %d\n", stridx);
+    if (_debug)
+      Serial.printf("found Moon Device at %d\n", stridx);
     /* look for closing brace */
     strend = Apex_Json.indexOf("}", stridx);
     if (strend == -1)
       return;
-    //Serial.println(Apex_Json.substring(stridx-5, strend+1));
+    if (_debug)
+      Serial.println(Apex_Json.substring(stridx-5, strend+1));
     /* look backwards from the device name for the open brace */
     strstart = Apex_Json.indexOf("{", stridx-60);
     if (strstart == -1)
       return;
-    //Serial.println(Apex_Json.substring(strstart, strend+1));
+    if (_debug)
+      Serial.println(Apex_Json.substring(strstart, strend+1));
     /* Hand it to the json procesor */
     j_error = deserializeJson(apex_doc, Apex_Json.substring(strstart, strend+1));
-    //Serial.printf("Error = %s\n", j_error.c_str());
+    if (_debug)
+      Serial.printf("Error = %s\n", j_error.c_str());
     if (!j_error) {
       json_request_complete = 1;
-      //Serial.println(apex_doc["intensity"]);
       apex_illumination = apex_doc["intensity"];
       Serial.printf("Set intensity to %d\n", apex_illumination);
     } else
@@ -436,20 +443,31 @@ void setup() {
     strlcpy(str_min_pot_res, json_doc["min_pot_res"] | MIN_POT_RES_STR, 8);
     strlcpy(str_apex_moondev, json_doc["apex_moondev"] | APEX_MOONDEV, 20);
     strlcpy(str_apex_poll, json_doc["apex_poll"] | APEX_POLL_STR, 8);
+
+    if (_debug) {
+      Serial.println("Config file contents:");
+      Serial.printf("apex_host: %s\n", str_apex_host);
+      Serial.printf("max_illum: %s\n", str_max_illum);
+      Serial.printf("min_pot_res: %s\n", str_min_pot_res);
+      Serial.printf("apex_moondev: %s\n", str_apex_moondev);
+      Serial.printf("apex_poll: %s\n", str_apex_poll);
+      Serial.println("-------");
+    }
   } else {
     Serial.println("failed to load json config");
   }
 
-  AsyncWiFiManagerParameter custom_apex_host("apex host", "apex host", str_apex_host, 70);
+  AsyncWiFiManagerParameter custom_apex_host("apex host", "apex host",
+					     str_apex_host, 70);
   AsyncWiFiManagerParameter custom_max_illum("max illumination",
-					     "max illumination", str_max_illum, 7);
+					     "max illumination", str_max_illum, 8);
   AsyncWiFiManagerParameter custom_min_pot_res("Minimum Pot RES",
 					       "Minimum Pot RES",
-					       str_min_pot_res, 7);
+					       str_min_pot_res, 8);
   AsyncWiFiManagerParameter custom_apex_moondev("apex moondev", "apex moondev",
 						str_apex_moondev, 20);
   AsyncWiFiManagerParameter custom_apex_poll("apex poll", "apex poll",
-					     str_apex_poll, 7);
+					     str_apex_poll, 8);
 
   
   AsyncWiFiManager wifiManager(&server, &dns);
@@ -476,7 +494,15 @@ void setup() {
   min_pot_res = atoi(str_min_pot_res);
   max_illum = atof(str_max_illum);
   apex_poll = atoi(str_apex_poll);
-  Serial.println(str_apex_moondev);
+  if (_debug) {
+    Serial.println("Config contents after wifi connect:");
+    Serial.printf("apex_host: %s\n", str_apex_host);
+    Serial.printf("max_illum: %s\n", str_max_illum);
+    Serial.printf("min_pot_res: %s\n", str_min_pot_res);
+    Serial.printf("apex_moondev: %s\n", str_apex_moondev);
+    Serial.printf("apex_poll: %s\n", str_apex_poll);
+    Serial.println("-------");
+  }
   
   /* Gather the time */
   setupDateTime();
@@ -499,10 +525,7 @@ void setup() {
 
         if (request->hasParam("apex_host", true)) {
             message = request->getParam("apex_host", true)->value();
-	    //strncpy(str_apex_host, message.c_str(), 69);
-	    sprintf(str_apex_host, "%s", message.c_str());
-	    Serial.println(str_apex_host);
-	    Serial.println(message);
+	    strncpy(str_apex_host, message.c_str(), 69);
 	    shouldSaveConfig = true;
         }
         if (request->hasParam("max_illum", true)) {
