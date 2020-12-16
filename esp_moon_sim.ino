@@ -19,7 +19,10 @@
 #include <AsyncHTTPRequest_Generic.h>  // https://github.com/khoih-prog/AsyncHTTPRequest_Generic
 #include <Ticker.h>
 
+/* If I was less lazy the NTP would be a config setting.  I'm not. */
 #define APEX_HOST "phoenix.garbled.net"
+#define NTP_SERVER "ntp.garbled.net"
+#define NTP_TZ -7
 #define APEX_MOONDEV "BluLED_4_5"
 #define KNOWN_NEW_MOON 1592721660 /* 06:41 6/21/2020 UTC */
 #define LUNAR_CYCLE 29.530588853
@@ -87,27 +90,23 @@ float cur_ill = 0.0;
     GPIO5: SDA  D2
 */
 
-//callback notifying us of the need to save config
+/* Tell the main loop to save the config */
 void saveConfigCallback () {
   Serial.println("Should save config");
   shouldSaveConfig = true;
 }
 
+/* Connect to NTP and tell it to update itself */
 void setupDateTime() {
-  // setup this after wifi connected
-  // you can use custom timeZone,server and timeout
-  DateTime.setTimeZone(-7);
-  DateTime.setServer("ntp.garbled.net");
-  // DateTime.begin(15 * 1000);
-  // this method config ntp and wait for time sync
-  // default timeout is 10 seconds
+  DateTime.setTimeZone(NTP_TZ);
+  DateTime.setServer(NTP_SERVER);
   DateTime.begin(15 * 1000);
   if (!DateTime.isTimeValid()) {
     Serial.println("Failed to get time from server.");
   }
 }
 
-
+/* Calculate the lunar illumination and update the OLED */
 float get_lunar_illumination() {
   unsigned long sec_since_known;
   float ill, f, days_since_known, cycles_since_known;
@@ -130,13 +129,18 @@ float get_lunar_illumination() {
   cycles_since_known = days_since_known / LUNAR_CYCLE;
   //Serial.printf("Cycles since known = %f\n", cycles_since_known);
 
+  /* Knock off the left of the decimal */
   f = cycles_since_known - (int)cycles_since_known;
+
+  /* In the first half of the cycle, the moon becomes more full, then
+     it hits full, and moves to new, so maximum illumination is halfway. */
   if (f <= 0.5) {
     ill = (f / 0.5);
   } else {
     ill = (1.0 - f) / 0.5;
   }
 
+  /* Just update the OLED here, because it's easier */
   display.clear();
   display.setFont(ArialMT_Plain_10);
   display.setTextAlignment(TEXT_ALIGN_LEFT);
@@ -151,12 +155,12 @@ float get_lunar_illumination() {
   return(ill);
 }
 
-
+/* 404 */
 void notFound(AsyncWebServerRequest *request) {
     request->send(404, "text/plain", "Not found");
 }
 
-
+/* The index.html, and form */
 AsyncResponseStream *index_html(AsyncWebServerRequest *request) {
   AsyncResponseStream *response = request->beginResponseStream("text/html");
   
@@ -200,7 +204,7 @@ AsyncResponseStream *index_html(AsyncWebServerRequest *request) {
   return(response);
 }
 
-
+/* A simple info page */
 AsyncResponseStream *info_html(AsyncWebServerRequest *request) {
   AsyncResponseStream *response = request->beginResponseStream("text/html");
 
@@ -224,7 +228,7 @@ AsyncResponseStream *info_html(AsyncWebServerRequest *request) {
   return(response);
 }
 
-
+/* Parse a config file */
 DynamicJsonDocument parse_json_conf(char *filename)
 {
   DynamicJsonDocument json_doc(JSON_CONFIG_FILE_SIZE);
@@ -260,7 +264,7 @@ DynamicJsonDocument parse_json_conf(char *filename)
   return(json_doc);
 }
 
-
+/* Save a config file */
 void save_config_to_fs()
 {
   DynamicJsonDocument json_doc(JSON_CONFIG_FILE_SIZE);
@@ -298,7 +302,7 @@ void save_config_to_fs()
   sprintf(str_apex_host, "%s", wtf);
 }
 
-
+/* Write data to the digipot */
 void DigitalPotWrite(int cmd, int val)
 {
   // constrain input value within 0 - 255
@@ -312,8 +316,9 @@ void DigitalPotWrite(int cmd, int val)
   digitalWrite(CS_PIN, HIGH);
 }
 
-/* Apex Code */
+/*********** Apex Code *************/
 
+/* Ask the apex for it's status */
 void sendApexRequest() 
 {
   char url[150];
@@ -326,7 +331,7 @@ void sendApexRequest()
   json_request_complete = 0;
 
   if (request.readyState() == readyStateUnsent || request.readyState() == readyStateDone) {
-    request.setDebug(true);
+    request.setDebug(false);
     request.open("GET", url);
     request.send();
   } else {
@@ -334,7 +339,16 @@ void sendApexRequest()
   }
 }
 
-
+/* We have to use the data callback here, not the ready callback.
+   The ready callback gets called when there is only partial data.
+   Therefore, we have to do this stupid dance, where we continually append
+   data to the internal buffer.
+   We work around the low memory, by constantly trying to find the device
+   we are looking for, and cutting the buffer down as we go, until we
+   finally find it.  Then we hack out just that section of the json,
+   and hand only that to ArduinoJson.  The apex typically returns in the range
+   of about 15k, which is just too much.
+*/
 void ApexDataCB(void* optParm, AsyncHTTPRequest* request, size_t avail)
 {
   DynamicJsonDocument apex_doc(JSON_APEX_SIZE);
@@ -343,31 +357,38 @@ void ApexDataCB(void* optParm, AsyncHTTPRequest* request, size_t avail)
   String discard, hold_apex;
 
   if (json_request_complete) {
+    /* Calling the responseText clears the internal buffer out of the lib */
     discard = request->responseText();
     return;
   }
 
-  Serial.println("In ApexDataCB");
+  //Serial.println("In ApexDataCB");
   Apex_Json += request->responseText();
 
+  /* Try to find the moon device in the current buffer */
   stridx = Apex_Json.indexOf(str_apex_moondev);
   if (stridx != -1) {
     //Serial.printf("found Moon Device at %d\n", stridx);
-    /* look for next brace */
+    /* look for closing brace */
     strend = Apex_Json.indexOf("}", stridx);
     if (strend == -1)
       return;
     //Serial.println(Apex_Json.substring(stridx-5, strend+1));
+    /* look backwards from the device name for the open brace */
     strstart = Apex_Json.indexOf("{", stridx-60);
     if (strstart == -1)
       return;
     //Serial.println(Apex_Json.substring(strstart, strend+1));
+    /* Hand it to the json procesor */
     j_error = deserializeJson(apex_doc, Apex_Json.substring(strstart, strend+1));
     //Serial.printf("Error = %s\n", j_error.c_str());
-    json_request_complete = 1;
-    //Serial.println(apex_doc["intensity"]);
-    apex_illumination = apex_doc["intensity"];
-    Serial.printf("Set intensity to %d\n", apex_illumination);
+    if (!j_error) {
+      json_request_complete = 1;
+      //Serial.println(apex_doc["intensity"]);
+      apex_illumination = apex_doc["intensity"];
+      Serial.printf("Set intensity to %d\n", apex_illumination);
+    } else
+      return;
   } else {
     /* Carefully manage the memory on the ESP */
     hold_apex = Apex_Json;
@@ -387,9 +408,8 @@ void ApexDataCB(void* optParm, AsyncHTTPRequest* request, size_t avail)
   }
 }
 
-
+/* The setup */
 void setup() {
-  // put your setup code here, to run once:
   Serial.begin(115200);
 
   /* First reset the pot to 0 */
@@ -402,7 +422,7 @@ void setup() {
   display.flipScreenVertically();
   display.setFont(ArialMT_Plain_10);
   display.setTextAlignment(TEXT_ALIGN_LEFT);
-  display.drawString(0, 0, "Hello world");
+  display.drawString(0, 0, "Initializing");
   display.display();
 
   /* Read config from FS */
@@ -434,7 +454,7 @@ void setup() {
   
   AsyncWiFiManager wifiManager(&server, &dns);
   wifiManager.setSaveConfigCallback(saveConfigCallback);
-  //reset saved settings
+  //reset saved settings uncomment to nuke FS
   //wifiManager.resetSettings();
   wifiManager.addParameter(&custom_apex_host);
   wifiManager.addParameter(&custom_max_illum);
@@ -465,6 +485,7 @@ void setup() {
   display.drawString(0, 0, DateTime.toString().c_str());
   display.display();
 
+  /* Setup the webserver */
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
       request->send(index_html(request));
     });
@@ -509,7 +530,8 @@ void setup() {
         }
         request->send(200, "text/plain", "Updated settings.");
     });
-  
+
+  /* Handle remote code upload */
   server.on("/update", HTTP_POST, [](AsyncWebServerRequest *request){
       // the request handler is triggered after the upload has finished... 
       // create the response, add header, and send response
@@ -552,18 +574,22 @@ void setup() {
 
     server.begin();
 
-    request.setDebug(true);
-    //request.onReadyStateChange(ApexRequestCB);
+    /* Ask the apex for current data once, and setup cron */
+    request.setDebug(false);
     request.onData(ApexDataCB);
     ticker.attach(APEX_POLL, sendApexRequest);
     sendApexRequest();
+    Serial.println("Setup complete.");
 }
 
+/* The main loop 
+   Basically just recalculate the lunar phase every 5 seconds, update the OLED,
+   and update the POT.
+*/
 void loop() {
   float ill = 0.0;
   int pota = 0;
 
-  // put your main code here, to run repeatedly:
   if (millis() - ms > 5000) {
     ms = millis();
 
