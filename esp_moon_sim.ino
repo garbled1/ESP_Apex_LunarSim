@@ -630,9 +630,11 @@ void loop() {
     Serial.printf("Local  Time:   %s\n", DateTime.toString().c_str());
 
     pota = (int)(ill * MAX_ILLUM * 255.0 * (apex_illumination / 100.0));
-    Serial.printf("PotA = %d\n", pota);
-    if (pota < MIN_POT_RES)
-      pota = MIN_POT_RES;
+    if (_debug)
+      Serial.printf("PotA before min: %d\n", pota);
+    if (pota < (MIN_POT_RES / 100.0) * 255.0)
+      pota = (MIN_POT_RES / 100.0) * 255.0;
+    Serial.printf("Setting PotA = %d\n", pota);
     
     DigitalPotWrite(POT0_SEL, pota);
   }
