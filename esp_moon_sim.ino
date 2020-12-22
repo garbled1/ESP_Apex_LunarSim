@@ -210,6 +210,7 @@ AsyncResponseStream *index_html(AsyncWebServerRequest *request) {
 
 /* A simple info page */
 AsyncResponseStream *info_html(AsyncWebServerRequest *request) {
+  int pota = 0;
   AsyncResponseStream *response = request->beginResponseStream("text/html");
 
   response->addHeader("Server","ESP Async Web Server");
@@ -225,7 +226,15 @@ AsyncResponseStream *info_html(AsyncWebServerRequest *request) {
   response->printf("<p>Minimum POT Resistance: %d</p>", min_pot_res);
   response->printf("<p>Apex Moon device: %s</p>", str_apex_moondev);
   response->printf("<p>Apex Poll Time: %d</p>", apex_poll);
-
+  response->printf("<p>apex_illumination: %d</p>", apex_illumination);
+  pota = (int)(cur_ill * max_illum * 255.0 * (apex_illumination / 100.0));
+  response->printf("<p>Pot A before min: %d</p>", pota);
+  if (pota < (min_pot_res / 100.0) * 255.0)
+      pota = (min_pot_res / 100.0) * 255.0;
+  response->printf("<p>Pot A after min: %d</p>", pota);
+  response->printf("<p>Final Ohm Value: %f</p>",
+		   cur_ill * max_illum * (apex_illumination / 100.0) * 100.0);
+  
   response->print("<p>To update image: curl -F \"image=@filename\" IP_ADDR/update</p>");
   response->print("</body></html>");
 
@@ -591,6 +600,8 @@ void setup() {
       if(final){ // if the final flag is set then this is the last frame of data
 	if(Update.end(true)){ //true to set the size to the current progress
           Serial.printf("Update Success: %u B\nRebooting...\n", index+len);
+	  request->send(200, "text/plain", "New binary uploaded.");
+	  restartRequired = true;
         } else {
           Update.printError(Serial);
         }
@@ -634,11 +645,16 @@ void loop() {
     Serial.printf("Lunar Illumination: %f\n", ill);
     Serial.printf("Local  Time:   %s\n", DateTime.toString().c_str());
 
-    pota = (int)(ill * MAX_ILLUM * 255.0 * (apex_illumination / 100.0));
+    if (_debug) {
+      Serial.printf("max_illum: %f\n", max_illum);
+      Serial.printf("apex_illumination: %d\n", apex_illumination);
+      Serial.printf("min_pot_res: %f\n", min_pot_res);
+    }
+    pota = (int)(ill * max_illum * 255.0 * (apex_illumination / 100.0));
     if (_debug)
       Serial.printf("PotA before min: %d\n", pota);
-    if (pota < (MIN_POT_RES / 100.0) * 255.0)
-      pota = (MIN_POT_RES / 100.0) * 255.0;
+    if (pota < (min_pot_res / 100.0) * 255.0)
+      pota = (min_pot_res / 100.0) * 255.0;
     Serial.printf("Setting PotA = %d\n", pota);
     
     DigitalPotWrite(POT0_SEL, pota);
