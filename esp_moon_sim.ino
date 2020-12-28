@@ -73,6 +73,7 @@ char str_max_illum[8] = MAX_ILLUM_STR;
 char str_min_pot_res[8] = MIN_POT_RES_STR;
 char str_apex_moondev[20] = APEX_MOONDEV;
 char str_apex_poll[8] = APEX_POLL_STR;
+char str_apex_illum[8];
 
 bool shouldSaveConfig = false;
 float max_illum = MAX_ILLUM;
@@ -401,7 +402,8 @@ void ApexDataCB(void* optParm, AsyncHTTPRequest* request, size_t avail)
       Serial.printf("Error = %s\n", j_error.c_str());
     if (!j_error) {
       json_request_complete = 1;
-      apex_illumination = apex_doc["intensity"];
+      strlcpy(str_apex_illum, apex_doc["intensity"] | "10", 8);
+      apex_illumination = atoi(str_apex_illum);
       Serial.printf("Set intensity to %d\n", apex_illumination);
     } else
       return;
