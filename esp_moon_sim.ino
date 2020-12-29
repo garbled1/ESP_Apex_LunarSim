@@ -367,7 +367,7 @@ void ApexDataCB(void* optParm, AsyncHTTPRequest* request, size_t avail)
 {
   DynamicJsonDocument apex_doc(JSON_APEX_SIZE);
   DeserializationError j_error;
-  int i, j, stridx, strstart, strend;
+  int i, j, k, stridx, strstart, strend;
   String discard, hold_apex;
 
   if (json_request_complete) {
@@ -391,7 +391,16 @@ void ApexDataCB(void* optParm, AsyncHTTPRequest* request, size_t avail)
     if (_debug)
       Serial.println(Apex_Json.substring(stridx-5, strend+1));
     /* look backwards from the device name for the open brace */
-    strstart = Apex_Json.indexOf("{", stridx-60);
+    for (k = stridx-1; k > 0 && k > stridx-100; k--) {
+      strstart = Apex_Json.indexOf("{", k);
+      if (_debug)
+	Serial.printf("stridx=%d k=%d strstart=%d\n", stridx, k, strstart);
+      if (strstart != -1 && strstart < stridx-1) {
+	if (_debug)
+	  Serial.printf("Found string start at %d\n", strstart);
+	break;
+      }
+    }
     if (strstart == -1)
       return;
     if (_debug)
@@ -402,8 +411,9 @@ void ApexDataCB(void* optParm, AsyncHTTPRequest* request, size_t avail)
       Serial.printf("Error = %s\n", j_error.c_str());
     if (!j_error) {
       json_request_complete = 1;
-      strlcpy(str_apex_illum, apex_doc["intensity"] | "10", 8);
-      apex_illumination = atoi(str_apex_illum);
+      // strlcpy(str_apex_illum, apex_doc["intensity"] | "10", 8);
+      // apex_illumination = atoi(str_apex_illum);
+      apex_illumination = apex_doc["intensity"];
       Serial.printf("Set intensity to %d\n", apex_illumination);
     } else
       return;
